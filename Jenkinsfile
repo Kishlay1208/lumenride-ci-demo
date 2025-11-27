@@ -56,3 +56,40 @@ pipeline {
         sh """
           echo "Starting container ${CONTAINER_NAME} mapping host port ${HOST_PORT} -> container port ${CONTAINER_PORT} ..."
           docker run -d --name ${CONTAINER_NAME} -p ${HOST_PORT}:${CONTAINER_PORT} ${IMAGE}
+          sleep 1
+          echo "Container started. Listing docker ps:"
+          docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.ID}}\\t{{.Image}}\\t{{.Names}}\\t{{.Ports}}"
+        """
+      }
+    }
+
+    stage('Smoke test') {
+      steps {
+        // Escape shell $ characters so Groovy doesn't try to interpolate them.
+        sh """
+          echo "Waiting up to 10s for service to respond..."
+          retries=10
+          until curl --silent --max-time 2 http://localhost:${HOST_PORT}/ | grep -q 'LumenRide service online' || [ \\$retries -le 0 ]; do
+            retries=\\$((retries-1))
+            sleep 1
+          done
+
+          if curl --silent --max-time 2 http://localhost:${HOST_PORT}/ | grep -q 'LumenRide service online'; then
+            echo "Smoke test passed: service responded on port ${HOST_PORT}"
+            curl --silent http://localhost:${HOST_PORT}/
+          else
+            echo "Smoke test failed: no response from http://localhost:${HOST_PORT}/"
+            docker logs ${CONTAINER_NAME} || true
+            error("Service did not respond on port ${HOST_PORT}")
+          fi
+        """
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Pipeline finished (status: ${currentBuild.currentResult})"
+    }
+  }
+}
